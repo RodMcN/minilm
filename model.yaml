@@ -1,0 +1,14 @@
+app:
+  name: My Application
+  debug: true
+  port: 8080
+
+database:
+  host: localhost
+  username: admin
+  password: secret
+
+features:
+  - login
+  - reporting
+  - notifications
