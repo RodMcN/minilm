@@ -5,7 +5,7 @@ from pathlib import Path
 from os import PathLike
 
 
-class Model(nn.Module):
+class MiniLM(nn.Module):
     def __init__(self, vocab_size, d_model, n_layers, padding_idx, tied=True):
         super().__init__()
 
@@ -38,4 +38,4 @@ class Model(nn.Module):
             with path.open("r", encoding="utf-8") as file:
                 config = yaml.safe_load(file)
 
-        return Model(**config)
+        return MiniLM(**config)
