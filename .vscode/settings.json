@@ -1,0 +1,22 @@
+{
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll.ruff": "explicit",
+      "source.organizeImports.ruff": "never"
+    }
+  },
+  "notebook.formatOnSave.enabled": false,
+  "notebook.codeActionsOnSave": {
+    "notebook.source.fixAll.ruff": "never",
+    "notebook.source.organizeImports.ruff": "never"
+  },
+  "ruff.configuration": {
+    "lint": {
+      "unfixable": [
+        "F401"
+      ]
+    }
+  }
+}
