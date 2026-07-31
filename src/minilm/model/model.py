@@ -18,6 +18,8 @@ class MiniLM(nn.Module):
         self.norm_out = nn.RMSNorm(d_model)
         self.linear_out = nn.Linear(d_model, vocab_size, bias=False)
 
+        self.init_weights()
+
         if tied:
             self.linear_out.weight = self.emb.weight
 
@@ -39,3 +41,19 @@ class MiniLM(nn.Module):
                 config = yaml.safe_load(file)
 
         return MiniLM(**config)
+
+    def init_weights(self):
+        def _init_normal(module):
+            if isinstance(module, (nn.Linear, nn.Embedding)):
+                nn.init.normal_(module.weight, mean=0.0, std=0.02)
+                if hasattr(module, "bias") and module.bias is not None:
+                    nn.init.zeros_(module.bias)
+
+        self.apply(_init_normal)
+
+        scale = (2 * len(self.transformer.layers)) ** -5
+        for name, module in self.named_modules():
+            if isinstance(module, nn.Linear) and name.endswith(
+                ("attn_ouy_proj", "down_proj")
+            ):
+                module.weight.data.mul_(scale)

@@ -72,8 +72,8 @@ class StreamingDataset(IterableDataset):
             input_ids.extend(encoding.ids + [eos_token_id])
 
             if len(input_ids) > sequence_length:
+                target_ids = input_ids[1 : sequence_length + 1]
                 input_ids = input_ids[:sequence_length]
-                target_ids = input_ids[1:] + [eos_token_id]
 
                 yield (
                     torch.tensor(input_ids, dtype=torch.long),

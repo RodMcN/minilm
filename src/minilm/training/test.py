@@ -30,7 +30,7 @@ def run_test_prompts(model, tokeniser, prompts=None, max_tokens=10):
     rows = torch.arange(len(prompts), device=device)
 
     for _ in range(max_tokens):
-        logits = model(ids)[0][rows, lengths - 1]
+        logits = model(ids)[rows, lengths - 1]
         next_ids = torch.distributions.Categorical(logits=logits).sample()
 
         ids = F.pad(ids, (0, 1), value=pad_id)
