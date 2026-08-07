@@ -5,6 +5,7 @@ from src.minilm.tokeniser import END_MESSAGE_TOKEN
 
 
 TEST_PROMPTS = [
+    END_MESSAGE_TOKEN,
     "Hello, my name is",
     "Once upon a time, there was",
     "The glass fell onto the floor and",
@@ -15,11 +16,13 @@ TEST_PROMPTS = [
     "The capital of France is",
     "The sun rises in the",
     "Maya opened the small wooden box. Inside, she found",
+    "A country is a distinct territory with defined borders, boundaries, people and ",
+    "A python function to",
 ]
 
 
 @torch.no_grad()
-def run_test_prompts(model, tokeniser, prompts=None, max_tokens=10):
+def run_test_prompts(model, tokeniser, prompts=None, max_tokens=50):
     prompts = TEST_PROMPTS if prompts is None else prompts
     device = next(model.parameters()).device
     pad_id = tokeniser.token_to_id(END_MESSAGE_TOKEN)
@@ -38,6 +41,10 @@ def run_test_prompts(model, tokeniser, prompts=None, max_tokens=10):
         lengths += 1
 
     return [
-        (prompts[i], str([tokeniser.decode([t]) for t in ids[i, :length].tolist()]))
+        (
+            prompts[i],
+            tokeniser.decode(ids[i, :length].tolist()),
+            [tokeniser.decode([t]) for t in ids[i, :length].tolist()],
+        )
         for i, length in enumerate(lengths.tolist())
     ]

@@ -1,4 +1,5 @@
 from src.minilm.tokeniser import train_tokeniser, load_tokeniser
+from pathlib import Path
 
 
 def get_tokeniser():
@@ -6,9 +7,9 @@ def get_tokeniser():
         return load_tokeniser("tokeniser.json")
     except FileNotFoundError:
         return train_tokeniser(
-            "data/smollm-corpus-dev/cosmopedia-v2/*.parquet",
-            "data/smollm-corpus-dev/fineweb-edu-dedup/*.parquet",
+            [str(p) for p in Path("data/train").rglob("*.parquet")],
             outfile="tokeniser.json",
+            max_samples=1_000_000,
         )
 
 

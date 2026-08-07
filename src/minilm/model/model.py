@@ -6,13 +6,24 @@ from os import PathLike
 
 
 class MiniLM(nn.Module):
-    def __init__(self, vocab_size, d_model, n_layers, padding_idx, tied=True):
+    def __init__(
+        self,
+        vocab_size,
+        d_model,
+        n_layers,
+        n_head,
+        padding_idx,
+        tied=True,
+        qk_norm=True,
+    ):
         super().__init__()
 
         self.emb = nn.Embedding(vocab_size, d_model, padding_idx=padding_idx)
         self.transformer = TransformerStack(
             n_layers=n_layers,
             d_model=d_model,
+            nhead=n_head,
+            qk_norm=qk_norm,
         )
 
         self.norm_out = nn.RMSNorm(d_model)
@@ -51,9 +62,9 @@ class MiniLM(nn.Module):
 
         self.apply(_init_normal)
 
-        scale = (2 * len(self.transformer.layers)) ** -5
+        scale = (2 * len(self.transformer.layers)) ** -0.5
         for name, module in self.named_modules():
             if isinstance(module, nn.Linear) and name.endswith(
-                ("attn_ouy_proj", "down_proj")
+                ("attn_out_proj", "down_proj")
             ):
                 module.weight.data.mul_(scale)

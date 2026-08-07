@@ -43,7 +43,7 @@ SPECIAL_TOKENS: Final[tuple[str, ...]] = (
     *AA_TOKENS,
 )
 
-DEFAULT_VOCAB_SIZE = 8_000
+DEFAULT_VOCAB_SIZE = 12_000
 
 
 def train_tokeniser(
@@ -56,7 +56,7 @@ def train_tokeniser(
         [
             load_dataset(
                 "parquet", data_files=data_files, split="train", streaming=True
-            )
+            ).select_columns("text")
             for data_files in datasets
         ]
     )
@@ -65,7 +65,7 @@ def train_tokeniser(
         batch = []
 
         for i, example in enumerate(dataset):
-            if max_samples and i > max_samples:
+            if max_samples is not None and i >= max_samples:
                 break
 
             text = example.get(text_column)

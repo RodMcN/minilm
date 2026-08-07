@@ -91,7 +91,13 @@ class RoPE(nn.Module):
 
 class TransformerBlock(nn.Module):
     def __init__(
-        self, d_model, nhead, dim_feedforward, norm_type: str | nn.Module, rope=True
+        self,
+        d_model,
+        nhead,
+        dim_feedforward,
+        norm_type: str | nn.Module,
+        qk_norm=True,
+        rope=True,
     ):
         super().__init__()
 
@@ -104,6 +110,11 @@ class TransformerBlock(nn.Module):
 
         self.norm1 = norm_type(d_model)
         self.norm2 = norm_type(d_model)
+
+        self.qk_norm = qk_norm
+        if self.qk_norm:
+            self.q_norm = norm_type(self.head_dim)
+            self.k_norm = norm_type(self.head_dim)
 
         self.qkv_proj = nn.Linear(d_model, 3 * d_model, bias=False)
         self.attn_out_proj = nn.Linear(d_model, d_model, bias=False)
@@ -130,9 +141,15 @@ class TransformerBlock(nn.Module):
 
         q, k, v = qkv.unbind(dim=2)
 
+        if self.qk_norm:
+            q = self.q_norm(q)
+            k = self.k_norm(k)
+
+        # [batch, seq len, n head, d head]
         q = q.transpose(1, 2)
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
+        # [batch, n head, seq len, d head]
 
         if self.rope is not None:
             q, k = self.rope(q, k)
@@ -166,6 +183,7 @@ class TransformerStack(nn.Module):
         nhead: int | None = None,
         dim_feedforward: int | None = None,
         norm_type="RMSNorm",
+        qk_norm=True,
     ):
         super().__init__()
 
@@ -174,7 +192,9 @@ class TransformerStack(nn.Module):
 
         self.layers = nn.ModuleList(
             [
-                TransformerBlock(d_model, nhead, dim_feedforward, norm_type)
+                TransformerBlock(
+                    d_model, nhead, dim_feedforward, norm_type, qk_norm=qk_norm
+                )
                 for _ in range(n_layers)
             ]
         )
