@@ -43,7 +43,7 @@ SPECIAL_TOKENS: Final[tuple[str, ...]] = (
     *AA_TOKENS,
 )
 
-DEFAULT_VOCAB_SIZE = 12_000
+DEFAULT_VOCAB_SIZE = 32_000
 
 
 def train_tokeniser(

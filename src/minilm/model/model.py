@@ -3,6 +3,7 @@ from .modules import TransformerStack
 import yaml
 from pathlib import Path
 from os import PathLike
+import torch
 
 
 class MiniLM(nn.Module):
@@ -33,6 +34,8 @@ class MiniLM(nn.Module):
 
         if tied:
             self.linear_out.weight = self.emb.weight
+            with torch.no_grad():
+                self.emb.weight[padding_idx].zero_()
 
     def forward(self, token_ids, attn_mask=None):
         x = self.emb(token_ids)
@@ -45,7 +48,7 @@ class MiniLM(nn.Module):
     def from_config(config: str | PathLike[str] | dict):
         if not isinstance(config, dict):
             path = Path(config)
-            if not Path.is_file():
+            if not path.is_file():
                 raise FileNotFoundError(f"{config:!r} is not a file")
 
             with path.open("r", encoding="utf-8") as file:

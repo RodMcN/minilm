@@ -1,0 +1,12 @@
+run:
+  max_steps: 5000
+  micro_batch_size: 32
+  effective_batch_size: 1024
+  sequence_length: 512
+  lr: 2e-4
+
+model:
+  d_model: 1024
+  n_head: 16
+  n_layers: 30
+  

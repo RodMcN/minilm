@@ -18,6 +18,8 @@ TEST_PROMPTS = [
     "Maya opened the small wooden box. Inside, she found",
     "A country is a distinct territory with defined borders, boundaries, people and ",
     "A python function to",
+    "def factorial(n):",
+    "To calculate the sum of a list",
 ]
 
 
@@ -33,8 +35,10 @@ def run_test_prompts(model, tokeniser, prompts=None, max_tokens=50):
     rows = torch.arange(len(prompts), device=device)
 
     for _ in range(max_tokens):
-        logits = model(ids)[rows, lengths - 1]
-        next_ids = torch.distributions.Categorical(logits=logits).sample()
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            logits = model(ids)[rows, lengths - 1]
+        # next_ids = torch.distributions.Categorical(logits=logits).sample()
+        next_ids = logits.argmax(-1)
 
         ids = F.pad(ids, (0, 1), value=pad_id)
         ids[rows, lengths] = next_ids

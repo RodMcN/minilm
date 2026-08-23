@@ -19,4 +19,10 @@ ENTRYPOINT ["/workdir/.venv/bin/torchrun", \
     "--nproc-per-node=gpu", \
     "--module", "src.minilm.training.train"]
 
-# docker run -it --rm --user "$(id -u):$(id -g)" --gpus all -v ./data:/workdir/data -v ./runs/:/workdir/runs/ train 123
+#   docker run -it --rm \
+#     --user "$(id -u):$(id -g)" \
+#     --gpus all \
+#     -v "$(pwd)/data:/workdir/data" \
+#     -v "$(pwd)/runs:/workdir/runs" \
+#     -v "$(pwd)/config.yaml:/workdir/config.yaml:ro" \
+#     train 123 /workdir/config.yaml

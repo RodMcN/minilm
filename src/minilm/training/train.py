@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import typer
 from loguru import logger
 from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
+from src.minilm.training.metrics_writer import MetricsWriter
 from tqdm.auto import tqdm
 import os
 
@@ -16,26 +16,20 @@ from src.minilm.training.dataloader import (
     SimpleDataset,
 )
 from src.minilm.training.test import run_test_prompts
-from src.minilm.training.schedule import get_lr_scheduler
+from src.minilm.training.optim import get_lr_scheduler, configure_optimiser
 from src.minilm.tokeniser import load_tokeniser
 
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
+import yaml
+from contextlib import nullcontext
+from src.minilm.training.config import Config
 
-MICRO_BATCH_SIZE = 32
-EFFECTIVE_BATCH_SIZE = 128
-SEQUENCE_LENGTH = 512
-TOKENS_PER_FULL_BATCH = SEQUENCE_LENGTH * EFFECTIVE_BATCH_SIZE
-TOKENS_PER_MICRO_BATCH = SEQUENCE_LENGTH * MICRO_BATCH_SIZE
-
-
-LR = 5e-4
-# LR = 5e-5
-
-D_MODEL = 64 * 4
-N_LAYERS = 10
-N_HEAD = 4
-# OPT = "muon"
+# MICRO_BATCH_SIZE = 32
+# EFFECTIVE_BATCH_SIZE = 128
+# SEQUENCE_LENGTH = 512
+# TOKENS_PER_FULL_BATCH = SEQUENCE_LENGTH * EFFECTIVE_BATCH_SIZE
+# TOKENS_PER_MICRO_BATCH = SEQUENCE_LENGTH * MICRO_BATCH_SIZE
 
 
 def setup_dist():
@@ -51,18 +45,25 @@ def cleanup_dist():
     dist.destroy_process_group()
 
 
-def main(run_name, max_steps: int = 50_000):
+def main(run_name, config):
     local_rank = setup_dist()
     global_rank = dist.get_rank()
+    group_rank = os.environ.get("NODE_RANK")
     world_size = dist.get_world_size()
     device = torch.device("cuda", local_rank)
-
     world_size = int(os.environ["WORLD_SIZE"])
-    local_accumulation_steps = EFFECTIVE_BATCH_SIZE // world_size // MICRO_BATCH_SIZE
+
+    config = Config.from_yaml(config)
+    run_config = config.run
+
+    micro_batch_size = run_config.micro_batch_size
+    effective_batch_size = run_config.effective_batch_size
+
+    local_accumulation_steps = effective_batch_size // world_size // micro_batch_size
     assert local_accumulation_steps > 0
     if global_rank == 0:
         logger.info(
-            f"{EFFECTIVE_BATCH_SIZE=}, {world_size=}, {MICRO_BATCH_SIZE=}. {local_accumulation_steps=}"
+            f"{effective_batch_size=}, {world_size=}, {micro_batch_size=}. {local_accumulation_steps=}"
         )
 
     tokeniser = load_tokeniser("tokeniser.json")
@@ -70,9 +71,7 @@ def main(run_name, max_steps: int = 50_000):
 
     model = MiniLM(
         vocab_size=tokeniser.get_vocab_size(),
-        d_model=D_MODEL,
-        n_layers=N_LAYERS,
-        n_head=N_HEAD,
+        **config.model.model_dump(),
         padding_idx=pad_id,
         tied=False,
     ).to(device)
@@ -82,92 +81,54 @@ def main(run_name, max_steps: int = 50_000):
     num_params = sum(p.numel() for p in model.parameters())
     logger.info(f"Initialised model with {num_params:,} params.")
 
-    # dataset = StreamingDataset(tokeniser)
-    dataset = SimpleDataset(tokeniser, sequence_length=SEQUENCE_LENGTH)
+    dataset = SimpleDataset(tokeniser, sequence_length=run_config.sequence_length)
     dataloader = DataLoader(
-        dataset, batch_size=MICRO_BATCH_SIZE, num_workers=2, pin_memory=True
+        dataset, batch_size=micro_batch_size, num_workers=2, pin_memory=True
     )
 
-    # sampler = DistributedSampler(dataset, shuffle=True)
-
-    # muon_params = []
-    # adam_params = []
-
-    # for name, p in model.named_parameters():
-    #     if not p.requires_grad:
-    #         continue
-
-    #     is_muon_candidate = (
-    #         p.ndim == 2
-    #         and "emb" not in name.lower()
-    #         and "linear_out" not in name.lower()
-    #     )
-
-    #     if is_muon_candidate:
-    #         muon_params.append(p)
-    #     else:
-    #         adam_params.append(p)
-
-    # muon = torch.optim.Muon(
-    #     muon_params,
-    #     lr=0.02,
-    # )
-
-    # adam = torch.optim.AdamW(adam_params, lr=3e-4, fused=True, weight_decay=0.01)
-
-    opt = torch.optim.AdamW(model.parameters(), lr=1e-4, fused=True, weight_decay=0.01)
+    opt = configure_optimiser(model.parameters(), lr=run_config.lr)
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(
         opt,
         lr_lambda=get_lr_scheduler(
             start_factor=0.01,
             end_factor=0.1,
-            warmup_steps=max_steps * 0.1,
-            constant_steps=max_steps * 0.05,
-            decay_steps=max_steps * 0.7,
+            warmup_steps=run_config.max_steps * 0.1,
+            constant_steps=0,
+            decay_steps=run_config.max_steps * 0.9,
         ),
     )
 
-    run_config = {
-        "max_steps": max_steps,
-        "num_params": num_params,
-        "vocab_size": tokeniser.get_vocab_size(),
-        "d_model": 64 * 4,
-        "n_layers": 6,
-        "micro_batch_size": MICRO_BATCH_SIZE,
-        "effective_batch_size": EFFECTIVE_BATCH_SIZE,
-        "sequence_length": SEQUENCE_LENGTH,
-        "tokens_per_micro_batch": TOKENS_PER_MICRO_BATCH,
-        "tokens_per_full_batch": TOKENS_PER_FULL_BATCH,
-        "optimizer": "AdamW",
-        "learning_rate": LR,
-    }
-
     if global_rank == 0:
-        writer = SummaryWriter(log_dir=f"runs/{run_name}")
+        writer = MetricsWriter(run_name)
+        pbar = tqdm(
+            total=run_config.max_steps,
+            disable=(not sys.stdout.isatty()),
+            dynamic_ncols=True,
+        )
     else:
         writer = None
+        pbar = None
 
     if writer:
         writer.add_hparams(
-            {"run_name": run_name, **run_config},
+            {"run_name": run_name, **config.model_dump()},
             {"model/num_params": num_params},
-        )
-        pbar = tqdm(
-            total=max_steps,
-            disable=(not sys.stdout.isatty()) and global_rank == 0,
-            dynamic_ncols=True,
         )
 
     step = 0
-    while step < max_steps:
+    while step < run_config.max_steps:
         model.zero_grad()
-        accum_loss = 0
+        accum_ce_loss = 0
 
         # pad_id
 
         for i, batch in enumerate(dataloader):
-            # TODO: no_sync
+            _is_sync_batch = (i + 1) % local_accumulation_steps == 0
+            # logger.debug(
+            #     f"Rank [{group_rank},{local_rank}] on batch {i:,}. Synching: {_is_sync_batch}"
+            # )
+            sync_context = nullcontext if _is_sync_batch else model.no_sync
 
             if len(batch) == 3:
                 x, y, mask = batch
@@ -178,73 +139,91 @@ def main(run_name, max_steps: int = 50_000):
             y = y.to(device, non_blocking=True)
             if mask is not None:
                 mask = mask.to(device, non_blocking=True)
+            with sync_context():
+                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                    valid = y != -100
+                    n_total = valid.sum()
+                    y_pred = model(x, attn_mask=mask).float()
 
-            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                valid = y != -100
-                n_total = valid.sum()
-                y_pred = model(x, attn_mask=mask)
+                    z = torch.logsumexp(y_pred, dim=-1)
 
-                ce_loss = F.cross_entropy(y_pred.transpose(1, 2), y, reduction="sum")
-                z = torch.logsumexp(y_pred.float(), dim=-1)
-                loss = (
-                    (ce_loss + 1e-4 * z[valid].square().sum())
-                    / n_total
-                    / local_accumulation_steps
-                )
+                    safe_y = y.masked_fill(~valid, 0)
+                    target_logits = y_pred.gather(
+                        dim=-1,
+                        index=safe_y.unsqueeze(-1),
+                    ).squeeze(-1)
 
-                accum_loss += ce_loss.item() / local_accumulation_steps / n_total
+                    nll = z - target_logits
 
-            loss.backward()
+                    ce_loss = torch.where(valid, nll, 0.0).sum()
+                    z_loss = torch.where(valid, z.square(), 0.0).sum()
 
-            if (i + 1) % local_accumulation_steps == 0:
+                    loss = (
+                        (ce_loss + 1e-4 * z_loss) / n_total / local_accumulation_steps
+                    )
+
+                    accum_ce_loss += (
+                        ce_loss.detach() / local_accumulation_steps / n_total
+                    )
+
+                loss.backward()
+
+            if _is_sync_batch:
                 total_norm = torch.nn.utils.clip_grad_norm_(
                     model.parameters(), max_norm=1.0
                 )
                 opt.step()
                 opt.zero_grad()
-                # muon.step()
-                # adam.step()
 
-                # muon.zero_grad()
-                # adam.zero_grad()
+                dist.all_reduce(accum_ce_loss, dist.ReduceOp.SUM)
+                accum_ce_loss /= world_size
 
                 step += 1
-                pbar.update()
-                writer.add_scalar(
-                    "train/loss",
-                    accum_loss,
-                    global_step=step,
-                )
-                writer.add_scalar(
-                    "train/lr",
-                    opt.param_groups[0]["lr"],
-                    global_step=step,
-                )
-                writer.add_scalar(
-                    "train/grad_norm",
-                    total_norm,
-                    global_step=step,
-                )
-                accum_loss = 0
+                if pbar:
+                    pbar.update()
+                if writer:
+                    writer.add_scalar(
+                        "train/ce_loss",
+                        accum_ce_loss,
+                        global_step=step,
+                    )
+                    writer.add_scalar(
+                        "train/lr",
+                        opt.param_groups[0]["lr"],
+                        global_step=step,
+                    )
+                    writer.add_scalar(
+                        "train/grad_norm",
+                        total_norm,
+                        global_step=step,
+                    )
+                accum_ce_loss = 0
 
                 scheduler.step()
                 if step % 1000 == 0:
-                    generations = run_test_prompts(model, tokeniser)
-                    for prompt, completion, completion_tokens in generations:
-                        writer.add_text(
-                            prompt,
-                            completion,
-                            global_step=step,
-                        )
+                    if global_rank == 0:
+                        generations = run_test_prompts(model.module, tokeniser)
+                        for prompt, completion, completion_tokens in generations:
+                            writer.add_text(
+                                prompt,
+                                completion,
+                                global_step=step,
+                            )
+                dist.barrier()
 
-            if step >= max_steps:
+            if step >= run_config.max_steps:
                 break
 
-    pbar.close()
-    writer.close()
-    cleanup_dist()
+    if pbar:
+        pbar.close()
+    if writer:
+        writer.close()
 
 
 if __name__ == "__main__":
-    typer.run(main)
+    try:
+        typer.run(main)
+    finally:
+        if dist.is_initialized():
+            cleanup_dist()
 # uv run python -m src.minilm.training.train
