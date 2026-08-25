@@ -4,7 +4,10 @@ COPY --from=ghcr.io/astral-sh/uv:0.12.2 /uv /uvx /bin/
 WORKDIR /workdir
 
 COPY pyproject.toml uv.lock .python-version ./
+
 ENV UV_PYTHON_INSTALL_DIR=/opt/uv/python
+ENV TYPER_STANDARD_TRACEBACK=1
+
 RUN uv sync --locked --no-install-project
 
 COPY tokeniser.json .

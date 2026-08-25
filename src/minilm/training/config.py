@@ -7,6 +7,8 @@ class ModelConfig(BaseModel):
     d_model: int
     n_head: int
     n_layers: int
+    tied: bool = False
+    qk_norm: bool = True
 
 
 class RunConfig(BaseModel):
@@ -15,6 +17,7 @@ class RunConfig(BaseModel):
     effective_batch_size: int
     sequence_length: int
     lr: float
+    seed: int = 42
 
 
 class Config(BaseModel):

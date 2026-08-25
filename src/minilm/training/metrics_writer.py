@@ -3,6 +3,8 @@ from pathlib import Path
 from typing import Any
 from torch.utils.tensorboard import SummaryWriter
 
+import torch
+
 
 class MetricsWriter:
     def __init__(
@@ -72,7 +74,7 @@ class MetricsWriter:
             raise RuntimeError("Cannot write metrics after MetricsWriter.close()")
         if self._tb_writer is not None:
             self._tb_writer.add_hparams(
-                hparam_dict,
+                self._flatten_hparams(hparam_dict),
                 metric_dict,
                 hparam_domain_discrete=hparam_domain_discrete,
                 run_name=run_name,
@@ -94,6 +96,18 @@ class MetricsWriter:
         if self._jsonl_file is not None:
             self._jsonl_file.close()
         self._closed = True
+
+    @classmethod
+    def _flatten_hparams(cls, hparams: dict[str:Any], prefix=""):
+        flat = {}
+        for k, v in hparams.items():
+            if isinstance(v, dict):
+                flat.update(cls._flatten_hparams(v, f"{k}/"))
+            elif isinstance(v, (bool, int, float, str, torch.Tensor)):
+                flat[k] = v
+            else:
+                flat[k] = str(v)
+        return flat
 
     @staticmethod
     def _as_json_scalar(value: Any) -> bool | int | float:

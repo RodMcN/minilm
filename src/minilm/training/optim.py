@@ -4,7 +4,7 @@ from torch.optim import AdamW, Muon
 
 
 def configure_optimiser(params: Iterable, lr: float):
-    adam = AdamW(params, lr=1e-4, fused=True, weight_decay=0.01)
+    adam = AdamW(params, lr=lr, fused=True, weight_decay=0.01)
     return adam
 
 

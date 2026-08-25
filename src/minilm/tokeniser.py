@@ -56,12 +56,12 @@ def train_tokeniser(
         [
             load_dataset(
                 "parquet", data_files=data_files, split="train", streaming=True
-            ).select_columns("text")
+            ).select_columns("completion")
             for data_files in datasets
         ]
     )
 
-    def batch_iterator(dataset, text_column="text", batch_size=1000):
+    def batch_iterator(dataset, text_column="completion", batch_size=1000):
         batch = []
 
         for i, example in enumerate(dataset):

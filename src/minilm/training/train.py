@@ -24,12 +24,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import yaml
 from contextlib import nullcontext
 from src.minilm.training.config import Config
-
-# MICRO_BATCH_SIZE = 32
-# EFFECTIVE_BATCH_SIZE = 128
-# SEQUENCE_LENGTH = 512
-# TOKENS_PER_FULL_BATCH = SEQUENCE_LENGTH * EFFECTIVE_BATCH_SIZE
-# TOKENS_PER_MICRO_BATCH = SEQUENCE_LENGTH * MICRO_BATCH_SIZE
+from src.minilm.training.seed import seed_everything, worker_init_fn
 
 
 def setup_dist():
@@ -66,24 +61,43 @@ def main(run_name, config):
             f"{effective_batch_size=}, {world_size=}, {micro_batch_size=}. {local_accumulation_steps=}"
         )
 
+    # same seed before model init
+    # re-seed again after init with rank
+    seed_everything(run_config.seed, rank=0)
+
     tokeniser = load_tokeniser("tokeniser.json")
     pad_id = tokeniser.token_to_id("<|pad|>")
 
-    model = MiniLM(
-        vocab_size=tokeniser.get_vocab_size(),
+    model_kwargs = {
+        "vocab_size": tokeniser.get_vocab_size(),
+        "padding_idx": pad_id,
         **config.model.model_dump(),
-        padding_idx=pad_id,
-        tied=False,
-    ).to(device)
+    }
+    model = MiniLM(**model_kwargs).to(device)
 
     model = DDP(model, device_ids=[local_rank])
-
     num_params = sum(p.numel() for p in model.parameters())
     logger.info(f"Initialised model with {num_params:,} params.")
 
-    dataset = SimpleDataset(tokeniser, sequence_length=run_config.sequence_length)
+    # seed again after init
+    rank_seed = seed_everything(run_config.seed, rank=global_rank)
+
+    dataset = SimpleDataset(
+        tokeniser,
+        sequence_length=run_config.sequence_length,
+        rank=global_rank,
+        world_size=world_size,
+    )
+
+    loader_gen = torch.Generator()
+    loader_gen.manual_seed(rank_seed)
     dataloader = DataLoader(
-        dataset, batch_size=micro_batch_size, num_workers=2, pin_memory=True
+        dataset,
+        batch_size=micro_batch_size,
+        num_workers=2,
+        pin_memory=True,
+        worker_init_fn=worker_init_fn,
+        generator=loader_gen,
     )
 
     opt = configure_optimiser(model.parameters(), lr=run_config.lr)
@@ -223,6 +237,10 @@ def main(run_name, config):
 if __name__ == "__main__":
     try:
         typer.run(main)
+    except Exception as e:
+        logger.exception(e)
+        logger.complete()
+        sys.stderr.flush()
     finally:
         if dist.is_initialized():
             cleanup_dist()

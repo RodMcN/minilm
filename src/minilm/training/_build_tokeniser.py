@@ -9,7 +9,7 @@ def get_tokeniser():
         return train_tokeniser(
             [str(p) for p in Path("data/train").rglob("*.parquet")],
             outfile="tokeniser.json",
-            max_samples=1_000_000,
+            max_samples=1_500_000,
         )
 
 
